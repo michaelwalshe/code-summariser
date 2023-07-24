@@ -1,8 +1,5 @@
-import hashlib
 import logging
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import tiktoken
 from langchain.text_splitter import RecursiveCharacterTextSplitter, Language
@@ -15,45 +12,27 @@ from codesummariser.config import (
     COST_PER_1K_TOKENS,
     MAX_TOKENS,
     MODEL_TEMPERATURE,
+    SUMMARY_CSV,
     MODEL,
     CODE_SUMMARY_PROMPT,
     EXT_MAP,
 )
-
-
-@dataclass
-class FileSummary:
-    """Dataclass to store the file summaries along with general info.
-    """
-    path: Path | str
-    summary: str = ""
-    contents_hash: str = ""
-
-    def __post_init__(self):
-        if not isinstance(self.path, Path):
-            self.path = Path(self.path)
-
-        if not self.contents_hash:
-            self.contents_hash = self.hash_file()
-
-    def __iter__(self):
-        return iter([str(self.path), self.summary, self.contents_hash])
-
-    def hash_file(self, block_size: int = 65536) -> str:
-        """Returns a hash of the file in this FileSummary"""
-        file_hasher = hashlib.sha256()
-        with self.path.open("rb") as f:
-            file_buffer = f.read(block_size)
-            while len(file_buffer) > 0:
-                file_hasher.update(file_buffer)
-                file_buffer = f.read(block_size)
-        return file_hasher.hexdigest()
+from codesummariser.io import safe_write_code_summary_csv, read_code_summary_csv
+from codesummariser.filesummary import FileSummary
 
 
 def get_text_splitter(
     ext: str, ext_map: dict[str, str] = EXT_MAP, **kwargs
 ) -> RecursiveCharacterTextSplitter:
-    """Returns a text splitter for the given file extension."""
+    """Returns a text splitter for the given file extension.
+
+    Args:
+        ext: The extension of the code file
+        ext_map: A dictionary of extensions to the full code language
+
+    Returns:
+        A LangChain RecursiveCharacterTextSplitter for that language
+    """
 
     # Handle special cases first, not covered by LangChain
     line_separators = ["\n\n", "\n", " ", ""]
@@ -80,19 +59,28 @@ def get_text_splitter(
             "\nwhere ",
             "\ngroup by ",
             "\nhaving ",
-            "\order by " * line_separators,
+            "\norder by ",
+            *line_separators,
         ]
         return RecursiveCharacterTextSplitter(separators=separators, **kwargs)
     elif ext in ext_map:
         return RecursiveCharacterTextSplitter.from_language(
-            Language(ext_map[ext], **kwargs)
+            Language(ext_map[ext]), **kwargs
         )
     else:
         raise ValueError(f"Unknown extension {ext}")
 
 
 def count_tokens(text: str, model: str = MODEL) -> int:
-    """Returns the number of tokens in the given text."""
+    """Returns the number of tokens in the given text.
+
+    Args:
+        text (str): The text string
+        model (str, optional): Which model to embed for. Defaults to MODEL.
+
+    Returns:
+        int: The number of tokens
+    """
     encoding = tiktoken.encoding_for_model(model)
     tokens = encoding.encode(text)
     num_tokens = len(tokens)
@@ -103,7 +91,14 @@ def check_cost(code_paths: list[Path], cost_per_1k: int = COST_PER_1K_TOKENS) ->
     """Determine an expected cost of passing all code to an LLM, based on the
     number of tokens after tokenising with tiktoken. Print this info,
     and check that the user still wants to continue!
-    """
+
+    Args:
+        code_paths: A list of all code files (as path objects)
+        cost_per_1k: The cost of running the model on 1000 tokens
+
+    Raises:
+        SystemExit: _description_
+    """    
     total_input_tokens = sum(count_tokens(cf.read_text()) for cf in code_paths)
     likely_output_tokens = len(code_paths) * 100
     total_tokens = total_input_tokens + likely_output_tokens
@@ -120,24 +115,75 @@ def check_cost(code_paths: list[Path], cost_per_1k: int = COST_PER_1K_TOKENS) ->
 
 def get_summaries(
     code_paths: list[Path],
-    existing_summaries: Optional[dict[Path, FileSummary]] = None,
+    code_ext: str = ".py",
+    summary_store: Path = SUMMARY_CSV,
+    always_check_existing_summaries: bool = False,
     model: str = MODEL,
-    ext_map: dict[str, str] = EXT_MAP,
     model_temperature: float = MODEL_TEMPERATURE,
     max_tokens: int = MAX_TOKENS,
 ) -> dict[Path, FileSummary]:
     """Ask LLM to summarise each code file. If the file has already been summarised,
     then use that. For files that are too large, it will summarise each chunk, and the
     summarise the summaries.
+
+    Args:
+        code_paths (list[Path]): The paths to read code from, all should be the same
+            file extension
+        code_ext (str, optional): The file extension of the code. Defaults to ".py".
+        summary_store (Path, optional): Where to save or append the summary to.
+            Defaults to SUMMARY_CSV.
+        always_check_existing_summaries (bool, optional): Whether to error if
+            an existing summary is not found. Defaults to False.
+        model (str, optional): Which AI model to use. Defaults to MODEL.
+        model_temperature (float, optional): The predictability of the model.
+            Defaults to MODEL_TEMPERATURE.
+        max_tokens (int, optional): The total number of tokens that MODEL can accept
+            at once. Defaults to MAX_TOKENS.
+
+    Raises:
+        FileNotFoundError: If summary_store does not exist and
+            always_check_existing_summaries is set
+
+    Returns:
+        dict[Path, FileSummary]: _description_
     """
+    if not all(p.suffix == code_ext for p in code_paths):
+        raise ValueError(f"Not extensions in code_paths equal {code_ext=}: {code_paths=}")
+
+    # Create LLM for the model used
     if model.startswith("gpt"):
-        logging.info("Using a chat model, this may be slower but can be cheaper")
+        logging.info(
+            f"Using a chat model: {model}, this may be slower but can be cheaper"
+        )
         llm = ChatOpenAI(model=model, temperature=model_temperature)
     else:
         logging.info("Using a standard LLM model")
         llm = OpenAI(model=model, temperature=model_temperature)
 
-    code_summaries: dict[Path, FileSummary] = {}
+    # Create the summariser for this llm
+    summary_chain = load_summarize_chain(
+        llm=llm,
+        chain_type="map_reduce",
+        map_prompt=CODE_SUMMARY_PROMPT.partial(lang=EXT_MAP[code_ext]),
+        combine_prompt=COMBINE_SUMMARY_PROMPT,
+    )
+
+    # Are there existing summaries to check?
+    logging.info(
+        f"Will check before summarising against existing summaries in {summary_store}"
+    )
+    if not summary_store.exists():
+        if always_check_existing_summaries:
+            raise FileNotFoundError(
+                f"Couldn't find {summary_store=} and "
+                f"had {always_check_existing_summaries=}"
+            )
+        else:
+            existing_summaries = None
+    else:
+        existing_summaries = read_code_summary_csv(summary_store)
+
+    # Summarise all files...
     for path in code_paths:
         logging.info(f"Summarising {path}")
 
@@ -155,18 +201,7 @@ def get_summaries(
 
         code_chunks = splitter.create_documents([code])
 
-        summary_chain = load_summarize_chain(
-            llm=llm,
-            chain_type="map_reduce",
-            map_prompt=CODE_SUMMARY_PROMPT.partial(lang=ext_map[path.suffix]),
-            combine_prompt=COMBINE_SUMMARY_PROMPT,
-        )
-
-        output = summary_chain.run(code_chunks)
-        code_file.summary = output.strip()
-        logging.info(
-            f"Summary for {path} is:\n{code_file.summary}\nOutputting to file..."
-        )
-        code_summaries[path] = code_file
-
-    return code_summaries | (existing_summaries or {})
+        code_file.summary = summary_chain.run(code_chunks).strip()
+        logging.info(f"Summary for {path} is:\n{code_file.summary}\n")
+        logging.info(f"Writing summaries to {summary_store}")
+        safe_write_code_summary_csv(code_file, summary_store)

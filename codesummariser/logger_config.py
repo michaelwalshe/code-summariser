@@ -15,8 +15,7 @@ def setup_logger(
 ) -> logging.Logger:
     """Create instance of a logger
 
-    Parameters:
-    -------
+    Args:
         file_name: str
             Optional, the name/path to the output logs, without a file extension.
             If none then no log file will be created.
@@ -29,10 +28,9 @@ def setup_logger(
         catch_errors: Bool
             Replace python standard sys.excepthook with a new exception
             handler that sends them to the log, default of True
+
     Returns:
-    -------
-    logging.Logger
-        A logging object
+        logging.Logger; A logging object
     """
     # Send warnings from warnings.warn to the log
     logging.captureWarnings(True)
@@ -91,15 +89,8 @@ def handle_exception(
 def clean_up_handlers(logger: logging.Logger) -> None:
     """Remove and close handlers, to avoid repeated output
 
-    Parameters
-    ----------
-    logger : logging.Logger
-        A logger
-
-    Returns
-    -------
-    None.
-
+    Args:
+        logger (logging.Logger): A logger
     """
     handlers = logger.handlers[:]
     for handler in handlers:
