@@ -1,11 +1,11 @@
 import csv
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Dict, List
 
 from codesummariser.filesummary import FileSummary
 
 
-def read_code_summary_csv(file: Path) -> dict[Path, FileSummary]:
+def read_code_summary_csv(file: Path) -> Dict[Path, FileSummary]:
     """Reads a CSV file of code summaries, and parse it in to a dictionary
     for easy checking
 

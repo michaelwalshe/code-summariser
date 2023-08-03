@@ -1,16 +1,17 @@
 import hashlib
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import List
 
 
-@dataclass(slots=True)
-class FileSummary:    
+@dataclass
+class FileSummary:
     """Dataclass to store the file summaries along with general info.
 
     Attributes:
         path (Path | str): Path to the file being summarised
         summary (str): A summary of the file, provided by the user
-        contents_has (str): The hash representing the file contents. Will be generated
+        contents_hash (str): The hash representing the file contents. Will be generated
             automatically
 
     Methods:
@@ -42,5 +43,5 @@ class FileSummary:
                 file_buffer = f.read(block_size)
         return file_hasher.hexdigest()
 
-    def field_names(self) -> list[str]:
+    def field_names(self) -> List[str]:
         return [f.name for f in fields(self)]

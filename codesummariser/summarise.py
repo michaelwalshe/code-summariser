@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Dict, List
 
 import tiktoken
 from langchain.text_splitter import RecursiveCharacterTextSplitter, Language
@@ -22,7 +23,7 @@ from codesummariser.filesummary import FileSummary
 
 
 def get_text_splitter(
-    ext: str, ext_map: dict[str, str] = EXT_MAP, **kwargs
+    ext: str, ext_map: Dict[str, str] = EXT_MAP, **kwargs
 ) -> RecursiveCharacterTextSplitter:
     """Returns a text splitter for the given file extension.
 
@@ -87,7 +88,7 @@ def count_tokens(text: str, model: str = MODEL) -> int:
     return num_tokens
 
 
-def check_cost(code_paths: list[Path], cost_per_1k: int = COST_PER_1K_TOKENS) -> None:
+def check_cost(code_paths: List[Path], cost_per_1k: int = COST_PER_1K_TOKENS) -> None:
     """Determine an expected cost of passing all code to an LLM, based on the
     number of tokens after tokenising with tiktoken. Print this info,
     and check that the user still wants to continue!
@@ -98,7 +99,7 @@ def check_cost(code_paths: list[Path], cost_per_1k: int = COST_PER_1K_TOKENS) ->
 
     Raises:
         SystemExit: _description_
-    """    
+    """
     total_input_tokens = sum(count_tokens(cf.read_text()) for cf in code_paths)
     likely_output_tokens = len(code_paths) * 100
     total_tokens = total_input_tokens + likely_output_tokens
@@ -114,14 +115,14 @@ def check_cost(code_paths: list[Path], cost_per_1k: int = COST_PER_1K_TOKENS) ->
 
 
 def get_summaries(
-    code_paths: list[Path],
+    code_paths: List[Path],
     code_ext: str = ".py",
     summary_store: Path = SUMMARY_CSV,
     always_check_existing_summaries: bool = False,
     model: str = MODEL,
     model_temperature: float = MODEL_TEMPERATURE,
     max_tokens: int = MAX_TOKENS,
-) -> dict[Path, FileSummary]:
+) -> None:
     """Ask LLM to summarise each code file. If the file has already been summarised,
     then use that. For files that are too large, it will summarise each chunk, and the
     summarise the summaries.
@@ -148,7 +149,9 @@ def get_summaries(
         dict[Path, FileSummary]: _description_
     """
     if not all(p.suffix == code_ext for p in code_paths):
-        raise ValueError(f"Not extensions in code_paths equal {code_ext=}: {code_paths=}")
+        raise ValueError(
+            f"Not extensions in code_paths equal {code_ext=}: {code_paths=}"
+        )
 
     # Create LLM for the model used
     if model.startswith("gpt"):
