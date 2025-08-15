@@ -3,15 +3,13 @@
 - [User Guide](#user-guide)
 - [Changelog](#changelog)
 
-This Python utility uses AI LLMs to summarise code files, producing a short summary of the important aspects for each file.
+A sample Python utility using LLMs to summarise code files, producing a short summary of the important aspects for each file.
 
 ## Setup
 
 This tool has been developed as a Python CLI (command-line interface), so to use first install, then run commands via the terminal.
 
-We will install the tool in a local virtual environment, using venv.
-
-To create our virtual environment and install the tool, run the following commands 
+To create the virtual environment and install the tool, run the following commands 
 from the project directory:
  - Windows:
 ```powershell
